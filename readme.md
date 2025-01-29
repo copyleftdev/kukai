@@ -1,11 +1,14 @@
 # KūKai
 
+<img src="logo.png" alt="KūKai Mascot" width="150" align="right" />
+
 ![Rust](https://img.shields.io/badge/language-Rust-orange?style=flat-square)
 ![Apache Arrow](https://img.shields.io/badge/arrow-v44-blue?style=flat-square)
 ![Tonic](https://img.shields.io/badge/tonic-gRPC-blueviolet?style=flat-square)
 ![License](https://img.shields.io/badge/license-BSD%203--Clause-green?style=flat-square)
 
-**KūKai** is a modular, _high-performance_ load-testing framework for TCP-based protocols. Inspired by the Hawaiian god **Kūkailimoku** (often called **Kū**), associated with warfare and strategic battles, **KūKai** aims to help you “wage war” on servers to test their capacity and resilience.
+**KūKai** is a modular, _high-performance_ load-testing framework for TCP-based protocols.  
+Inspired by the Hawaiian god **Kūkailimoku** (often called **Kū**), associated with warfare and strategic battles, **KūKai** aims to help you “wage war” on servers to test their capacity and resilience.
 
 ---
 
@@ -30,7 +33,7 @@ Hence, **KūKai** suggests **unstoppable** traffic generation and **powerful** t
   - **Standalone** writes all metrics to an `.arrow` file for offline analysis.
 
 - **Flexible TCP**  
-  - Sends arbitrary payloads (e.g. HTTP, raw TCP).  
+  - Sends arbitrary payloads (e.g., HTTP, raw TCP).  
   - Tracks success/failure and latency per request.
 
 - **Analytics-Ready**  
@@ -182,6 +185,27 @@ weight = 2.0
 ## License
 
 **BSD 3-Clause** © 2025 [CopyleftDev](https://github.com/copyleftdev)
+
+```
+Redistribution and use in source and binary forms, with or without modification, are permitted provided
+that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and 
+   the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions 
+   and the following disclaimer in the documentation and/or other materials provided with the distribution.
+3. Neither the name of CopyleftDev nor the names of its contributors may be used to endorse or promote 
+   products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS” AND ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE 
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR 
+TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF 
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 **Mahalo nui!**  
 KūKai is built for the community—happy load testing!
