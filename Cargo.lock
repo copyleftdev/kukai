@@ -813,11 +813,13 @@ dependencies = [
  "arrow",
  "arrow-flight",
  "arrow-ipc",
+ "bytes",
  "futures",
  "prost",
  "rand",
  "serde",
  "tokio",
+ "tokio-stream",
  "toml",
  "tonic",
 ]

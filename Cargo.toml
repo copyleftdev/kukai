@@ -2,10 +2,6 @@
 name = "kukai"
 version = "0.1.0"
 edition = "2021"
-[package]
-name = "kukai"
-version = "0.1.0"
-edition = "2021"
 
 [dependencies]
 anyhow = "1"
