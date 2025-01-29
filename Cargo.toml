@@ -1,0 +1,23 @@
+[package]
+name = "kukai"
+version = "0.1.0"
+edition = "2021"
+[package]
+name = "kukai"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+rand = "0.8"
+arrow = "44.0.0"
+arrow-ipc = "44.0.0"
+arrow-flight = "44.0.0"
+tonic = "0.9"
+prost = "0.11"
+futures = "0.3"
+tokio-stream = "0.1"
+bytes = "1"

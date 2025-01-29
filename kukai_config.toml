@@ -1,0 +1,25 @@
+# mode = "commander" | "edge" | "standalone"
+mode = "standalone"
+
+[commander]
+edges = ["127.0.0.1:50051"]
+
+[edge]
+commander_address = "127.0.0.1:50051"
+
+[load]
+rps = 50
+duration_seconds = 10
+concurrency = 2
+payload = "GET / HTTP/1.1\r\nHost: example\r\n\r\n"
+arrow_output = "kukai_metrics.arrow"
+
+[[load.targets]]
+addr = "127.0.0.1"
+port = 8080
+weight = 1.0
+
+[[load.targets]]
+addr = "127.0.0.1"
+port = 9090
+weight = 1.0
