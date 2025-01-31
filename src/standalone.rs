@@ -25,7 +25,7 @@ struct AttemptMetric {
 }
 
 pub async fn run_standalone(load: &LoadConfig) -> Result<()> {
-    println!("Standalone mode -> writing Arrow to {}", load.arrow_output);
+    println!("Standalone mode -> Arrow file: {}", load.arrow_output);
     let metrics = Arc::new(Mutex::new(Vec::new()));
     let end_time = Instant::now() + Duration::from_secs(load.duration_seconds as u64);
 
@@ -39,17 +39,18 @@ pub async fn run_standalone(load: &LoadConfig) -> Result<()> {
         }));
     }
 
-    let flush_mref = metrics.clone();
-    let path = load.arrow_output.clone();
+    let flush_ref = metrics.clone();
+    let arrow_path = load.arrow_output.clone();
     let flusher = tokio::spawn(async move {
         loop {
             time::sleep(Duration::from_secs(2)).await;
             let mut local = {
-                let mut g = flush_mref.lock().unwrap();
+                let mut g = flush_ref.lock().unwrap();
                 std::mem::take(&mut *g)
             };
             if !local.is_empty() {
-                let _ = append_to_arrow(&path, &mut local);
+                // If you want to handle the error, do `if let Err(e) = ... { }`
+                let _ = append_to_arrow(&arrow_path, &mut local);
             }
         }
     });
@@ -69,7 +70,7 @@ pub async fn run_standalone(load: &LoadConfig) -> Result<()> {
     }
 
     flusher.abort();
-    println!("Standalone mode complete.");
+    println!("Standalone complete.");
     Ok(())
 }
 
@@ -83,7 +84,7 @@ async fn run_worker(
     while Instant::now() < end {
         let t = pick_target(&targets, &mut rng);
         let addr = format!("{}:{}", t.addr, t.port);
-        let st = Instant::now();
+        let start = Instant::now();
         let success = match tokio::net::TcpStream::connect(&addr).await {
             Ok(mut s) => {
                 use tokio::io::AsyncWriteExt;
@@ -91,7 +92,7 @@ async fn run_worker(
             }
             Err(_) => false,
         };
-        let latency_us = st.elapsed().as_micros() as u64;
+        let latency_us = start.elapsed().as_micros() as u64;
         {
             let mut g = metrics.lock().unwrap();
             g.push(AttemptMetric {
@@ -136,22 +137,24 @@ fn append_to_arrow(path: &str, items: &mut Vec<AttemptMetric>) -> Result<()> {
         Field::new("latency_us", DataType::UInt64, false),
     ]);
 
+    // If your builder methods truly return (), remove ? usage:
     let mut tsb = TimestampMicrosecondBuilder::new();
-    let mut sb = StringBuilder::new();
-    let mut bb = BooleanBuilder::new();
-    let mut ub = UInt64Builder::new();
+    let mut tgtb = StringBuilder::new();
+    let mut succb = BooleanBuilder::new();
+    let mut latb = UInt64Builder::new();
 
     for m in items.iter() {
-        tsb.append_value(m.ts_micros)?;
-        sb.append_value(&m.target)?;
-        bb.append_value(m.success)?;
-        ub.append_value(m.latency_us)?;
+        // Remove `?` if method returns ()
+        tsb.append_value(m.ts_micros); 
+        tgtb.append_value(&m.target);
+        succb.append_value(m.success);
+        latb.append_value(m.latency_us);
     }
 
     let ts_arr = tsb.finish();
-    let s_arr = sb.finish();
-    let b_arr = bb.finish();
-    let u_arr = ub.finish();
+    let s_arr = tgtb.finish();
+    let b_arr = succb.finish();
+    let u_arr = latb.finish();
 
     let batch = RecordBatch::try_new(
         std::sync::Arc::new(schema.clone()),
@@ -162,6 +165,7 @@ fn append_to_arrow(path: &str, items: &mut Vec<AttemptMetric>) -> Result<()> {
             std::sync::Arc::new(u_arr),
         ],
     )?;
+
     items.clear();
 
     let mut file = OpenOptions::new()
@@ -171,6 +175,7 @@ fn append_to_arrow(path: &str, items: &mut Vec<AttemptMetric>) -> Result<()> {
         .write(true)
         .open(path)?;
     file.seek(SeekFrom::End(0))?;
+
     let mut writer = FileWriter::try_new(file, &schema)?;
     writer.write(&batch)?;
     writer.finish()?;

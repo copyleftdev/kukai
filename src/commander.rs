@@ -7,8 +7,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, transport::Server};
 use arrow_flight::{
     flight_service_server::{FlightService, FlightServiceServer},
-    Action, ActionType, Criteria, FlightData, FlightDescriptor, FlightInfo, HandshakeRequest,
-    HandshakeResponse, PutResult, SchemaResult, Ticket,
+    Action, ActionType, Criteria, FlightData, FlightDescriptor, FlightInfo,
+    HandshakeRequest, HandshakeResponse, PutResult, SchemaResult, Ticket,
 };
 
 use crate::config::{LoadConfig, CommanderConfig};
@@ -40,18 +40,22 @@ impl FlightService for KaukaiFlightServer {
 
     async fn handshake(
         &self,
-        mut req: Request<tonic::Streaming<HandshakeRequest>>,
+        req: Request<tonic::Streaming<HandshakeRequest>>,
     ) -> Result<Response<Self::HandshakeStream>, Status> {
         let (tx, rx) = mpsc::channel(1);
         let mut stream = req.into_inner();
+
         tokio::spawn(async move {
-            while let Some(Ok(_)) = stream.next().await {}
+            while let Some(Ok(_)) = stream.next().await {
+                // parse or validate credentials
+            }
             let _ = tx.send(Ok(HandshakeResponse {
                 protocol_version: 0,
                 payload: Default::default(),
             }))
             .await;
         });
+
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 
@@ -139,10 +143,12 @@ impl FlightService for KaukaiFlightServer {
     }
 }
 
-pub async fn run_commander(_load: &LoadConfig, c: &CommanderConfig) -> Result<()> {
-    println!("Commander. Will listen on 0.0.0.0:50051. Edges: {:?}", c.edges);
+pub async fn run_commander(_load: &LoadConfig, cmdr: &CommanderConfig) -> Result<()> {
+    println!("Commander -> edges: {:?}", cmdr.edges);
     let addr = "0.0.0.0:50051".parse()?;
     let service = KaukaiFlightServer::new();
+    println!("Commander listening on {}", addr);
+
     Server::builder()
         .add_service(FlightServiceServer::new(service))
         .serve(addr)

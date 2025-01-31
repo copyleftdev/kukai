@@ -21,7 +21,7 @@ struct AttemptMetric {
 pub async fn run_edge(load: &LoadConfig, edge: &EdgeConfig) -> Result<()> {
     println!("Edge mode -> Commander: {}", edge.commander_address);
     let metrics = Arc::new(Mutex::new(Vec::new()));
-    let end_time = Instant::now() + Duration::from_secs(load.duration_seconds as u64);
+    let end_time = Instant::now() + std::time::Duration::from_secs(load.duration_seconds as u64);
 
     let mut tasks = vec![];
     for _ in 0..load.concurrency {
@@ -29,17 +29,17 @@ pub async fn run_edge(load: &LoadConfig, edge: &EdgeConfig) -> Result<()> {
         let tlist = load.targets.clone();
         let pay = load.payload.clone();
         tasks.push(tokio::spawn(async move {
-            run_worker(mref, tlist, pay, end_time).await;
+            worker_task(mref, tlist, pay, end_time).await;
         }));
     }
 
-    let flush_ref = metrics.clone();
+    let flush_metrics = metrics.clone();
     let commander_addr = edge.commander_address.clone();
     let flusher = tokio::spawn(async move {
         loop {
             time::sleep(Duration::from_secs(2)).await;
             let mut local = {
-                let mut g = flush_ref.lock().unwrap();
+                let mut g = flush_metrics.lock().unwrap();
                 std::mem::take(&mut *g)
             };
             if !local.is_empty() {
@@ -67,17 +67,17 @@ pub async fn run_edge(load: &LoadConfig, edge: &EdgeConfig) -> Result<()> {
     Ok(())
 }
 
-async fn run_worker(
+async fn worker_task(
     metrics: Arc<Mutex<Vec<AttemptMetric>>>,
     targets: Vec<Target>,
     payload: String,
-    end: Instant,
+    end_time: Instant,
 ) {
     let mut rng = StdRng::from_entropy();
-    while Instant::now() < end {
+    while Instant::now() < end_time {
         let t = pick_target(&targets, &mut rng);
         let addr = format!("{}:{}", t.addr, t.port);
-        let st = Instant::now();
+        let start = Instant::now();
         let success = match tokio::net::TcpStream::connect(&addr).await {
             Ok(mut stream) => {
                 use tokio::io::AsyncWriteExt;
@@ -85,7 +85,7 @@ async fn run_worker(
             }
             Err(_) => false,
         };
-        let latency_us = st.elapsed().as_micros() as u64;
+        let latency_us = start.elapsed().as_micros() as u64;
         {
             let mut g = metrics.lock().unwrap();
             g.push(AttemptMetric {
@@ -123,7 +123,6 @@ async fn push_metrics(addr: &str, items: &mut Vec<AttemptMetric>) -> Result<()> 
     if items.is_empty() {
         return Ok(());
     }
-    // Here, we'll just produce some raw bytes (like CSV).
     let mut raw = Vec::new();
     for m in items.iter() {
         let line = format!("{},{},{},{}\n", m.ts_micros, m.target, m.success, m.latency_us);
@@ -131,19 +130,21 @@ async fn push_metrics(addr: &str, items: &mut Vec<AttemptMetric>) -> Result<()> 
     }
     items.clear();
 
-    let mut client = FlightServiceClient::connect(format!("http://{}", addr)).await?;
-    let resp = client
-        .do_put(Request::new(futures::stream::empty()))
-        .await?;
-    let (mut tx, mut rx) = resp.into_parts();
     let chunk = FlightData {
         data_header: Vec::new().into(),
         data_body: raw.into(),
         app_metadata: Vec::new().into(),
         flight_descriptor: None,
     };
-    tx.send(chunk).await?;
-    tx.close().await?;
-    while let Some(_msg) = rx.message().await? {}
+
+    // create a simple stream of FlightData
+    let data_stream = futures::stream::iter(vec![chunk]);
+    let mut client = FlightServiceClient::connect(format!("http://{}", addr)).await?;
+    let response = client.do_put(Request::new(data_stream)).await?;
+    let mut result_stream = response.into_inner();
+
+    while let Some(_msg) = result_stream.message().await? {
+        // handle PutResult if needed
+    }
     Ok(())
 }

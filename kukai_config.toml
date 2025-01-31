@@ -1,4 +1,3 @@
-# mode = "commander" | "edge" | "standalone"
 mode = "standalone"
 
 [commander]

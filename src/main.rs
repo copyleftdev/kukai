@@ -16,6 +16,7 @@ fn main() -> Result<()> {
             eprintln!("Usage: {} --config <PATH>", args[0]);
             std::process::exit(1);
         }
+
         let cfg = load_config(&args[2])?;
         match cfg.mode.as_str() {
             "commander" => {
