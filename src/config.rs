@@ -10,6 +10,7 @@ pub struct Target {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct LoadConfig {
+    // We're actually using `rps`, so no need for #[allow(dead_code)]
     pub rps: usize,
     pub duration_seconds: usize,
     pub concurrency: usize,

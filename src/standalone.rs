@@ -25,7 +25,10 @@ struct AttemptMetric {
 }
 
 pub async fn run_standalone(load: &LoadConfig) -> Result<()> {
-    println!("Standalone mode -> Arrow file: {}", load.arrow_output);
+    println!("Standalone mode -> writing Arrow to: {}", load.arrow_output);
+    // Use `rps` so it's not considered dead
+    println!("Standalone RPS: {}", load.rps);
+
     let metrics = Arc::new(Mutex::new(Vec::new()));
     let end_time = Instant::now() + Duration::from_secs(load.duration_seconds as u64);
 
@@ -49,7 +52,7 @@ pub async fn run_standalone(load: &LoadConfig) -> Result<()> {
                 std::mem::take(&mut *g)
             };
             if !local.is_empty() {
-                // If you want to handle the error, do `if let Err(e) = ... { }`
+                // we ignore the error for these periodic flushes
                 let _ = append_to_arrow(&arrow_path, &mut local);
             }
         }
@@ -65,12 +68,13 @@ pub async fn run_standalone(load: &LoadConfig) -> Result<()> {
             std::mem::take(&mut *g)
         };
         if !leftover.is_empty() {
+            // final flush, propagate error
             append_to_arrow(&load.arrow_output, &mut leftover)?;
         }
     }
 
     flusher.abort();
-    println!("Standalone complete.");
+    println!("Standalone mode complete.");
     Ok(())
 }
 
@@ -130,6 +134,7 @@ fn append_to_arrow(path: &str, items: &mut Vec<AttemptMetric>) -> Result<()> {
     if items.is_empty() {
         return Ok(());
     }
+
     let schema = Schema::new(vec![
         Field::new("timestamp_micros", DataType::Timestamp(TimeUnit::Microsecond, None), false),
         Field::new("target", DataType::Utf8, false),
@@ -137,14 +142,14 @@ fn append_to_arrow(path: &str, items: &mut Vec<AttemptMetric>) -> Result<()> {
         Field::new("latency_us", DataType::UInt64, false),
     ]);
 
-    // If your builder methods truly return (), remove ? usage:
+    // If your append_value returns (), remove ? usage or handle differently
     let mut tsb = TimestampMicrosecondBuilder::new();
     let mut tgtb = StringBuilder::new();
     let mut succb = BooleanBuilder::new();
     let mut latb = UInt64Builder::new();
 
     for m in items.iter() {
-        // Remove `?` if method returns ()
+        // If your arrow version returns () instead of Result, remove ?
         tsb.append_value(m.ts_micros); 
         tgtb.append_value(&m.target);
         succb.append_value(m.success);

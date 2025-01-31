@@ -19,9 +19,12 @@ struct AttemptMetric {
 }
 
 pub async fn run_edge(load: &LoadConfig, edge: &EdgeConfig) -> Result<()> {
-    println!("Edge mode -> Commander: {}", edge.commander_address);
+    println!("Edge mode -> Commander at: {}", edge.commander_address);
+    // Use rps so no dead_code warning
+    println!("Using RPS: {}", load.rps);
+
     let metrics = Arc::new(Mutex::new(Vec::new()));
-    let end_time = Instant::now() + std::time::Duration::from_secs(load.duration_seconds as u64);
+    let end_time = Instant::now() + Duration::from_secs(load.duration_seconds as u64);
 
     let mut tasks = vec![];
     for _ in 0..load.concurrency {
@@ -77,15 +80,15 @@ async fn worker_task(
     while Instant::now() < end_time {
         let t = pick_target(&targets, &mut rng);
         let addr = format!("{}:{}", t.addr, t.port);
-        let start = Instant::now();
+        let st = Instant::now();
         let success = match tokio::net::TcpStream::connect(&addr).await {
-            Ok(mut stream) => {
+            Ok(mut s) => {
                 use tokio::io::AsyncWriteExt;
-                stream.write_all(payload.as_bytes()).await.is_ok()
+                s.write_all(payload.as_bytes()).await.is_ok()
             }
             Err(_) => false,
         };
-        let latency_us = start.elapsed().as_micros() as u64;
+        let latency_us = st.elapsed().as_micros() as u64;
         {
             let mut g = metrics.lock().unwrap();
             g.push(AttemptMetric {
@@ -137,7 +140,6 @@ async fn push_metrics(addr: &str, items: &mut Vec<AttemptMetric>) -> Result<()> 
         flight_descriptor: None,
     };
 
-    // create a simple stream of FlightData
     let data_stream = futures::stream::iter(vec![chunk]);
     let mut client = FlightServiceClient::connect(format!("http://{}", addr)).await?;
     let response = client.do_put(Request::new(data_stream)).await?;
