@@ -43,25 +43,22 @@ Hence, **KūKai** suggests **unstoppable** traffic generation and **powerful** t
 
 ## Architecture Diagram
 
-Below is a **Mermaid** chart that illustrates KūKai’s modes and data flow:
-
 ```mermaid
 flowchart LR
     subgraph Commander Mode
-        A[Commander<br>gRPC Arrow Flight Server] -- Orchestrates Tests --> B[Edge Nodes]
-        B -- Telemetry --> A
+        A[Commander + gRPC Arrow Flight Server] --> B[Edge Nodes]
+        A -- "Orchestrates Tests" --> B
+        B -- "Telemetry" --> A
     end
 
     subgraph Edge Mode
-        B -- Local Load --> T(Target(s))
+        B -- "Local Load" --> T((Servers / Targets))
     end
 
     subgraph Standalone Mode
-        C[Standalone<br>Local Load Test]
-        C -- Writes Metrics --> F[kukai_metrics.arrow]
+        C[Standalone Local Load Test]
+        C -- "Writes Metrics" --> F[kukai_metrics.arrow]
     end
-
-    T((Servers<br>/ Targets))
 
     style A fill:#ffdddd,stroke:#ffaaaa,stroke-width:2px
     style B fill:#ddffdd,stroke:#aaffaa,stroke-width:2px
@@ -69,10 +66,6 @@ flowchart LR
     style T fill:#fff2cc,stroke:#ffe599,stroke-width:2px
     style F fill:#ffe6cc,stroke:#ffd18e,stroke-width:2px
 ```
-
-- **Commander** orchestrates test configurations, accumulates telemetry from edges.  
-- **Edges** run local load tasks against targets, pushing metrics back to the commander.  
-- **Standalone** runs everything locally, storing results in `.arrow`.
 
 ---
 
@@ -125,13 +118,14 @@ weight = 2.0
 
 #### Fields:
 
-- **mode**:
+- **mode**:  
   - `commander`: Runs Arrow Flight server for telemetry.  
   - `edge`: Connects to the commander, runs the load test.  
   - `standalone`: Local testing, writes Arrow file to disk.
+
 - **commander.edges**: List of edge node addresses (e.g. `["edge1:50051", "edge2:50051"]`)—used only if `mode=commander`.
 - **edge.commander_address**: IP/Port for commander—only if `mode=edge`.
-- **load**:
+- **load**:  
   - **rps**: Target requests per second.  
   - **duration_seconds**: How long to run the test.  
   - **concurrency**: Number of parallel worker tasks.  
@@ -159,7 +153,7 @@ weight = 2.0
      cargo run --release -- --config kukai_config.toml
      ```
      - Generates `kukai_metrics.arrow` locally.
-   
+
    - **Commander**:
      ```bash
      # Terminal A
@@ -167,7 +161,7 @@ weight = 2.0
      cargo run --release -- --config kukai_config.toml
      ```
      - Waits on `0.0.0.0:50051` for edges to connect.
-   
+
    - **Edge**:
      ```bash
      # Terminal B
@@ -196,7 +190,7 @@ weight = 2.0
     ```
 
 - **Commander**  
-  - By default, the commander accumulates raw Arrow Flight chunks in memory (in the reference skeleton).
+  - By default, the commander accumulates raw Arrow Flight chunks in memory (in the reference skeleton).  
   - Extend it to decode or write them to disk as `.arrow`.
 
 ---
@@ -222,26 +216,6 @@ weight = 2.0
 
 **BSD 3-Clause** © 2025 [CopyleftDev](https://github.com/copyleftdev)
 
-```
-Redistribution and use in source and binary forms, with or without modification, are permitted provided
-that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice, this list of conditions and 
-   the following disclaimer.
-2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions 
-   and the following disclaimer in the documentation and/or other materials provided with the distribution.
-3. Neither the name of CopyleftDev nor the names of its contributors may be used to endorse or promote 
-   products derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS” AND ANY EXPRESS OR IMPLIED
-WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE 
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
-INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR 
-TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF 
-ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-```
 
 **Mahalo nui!**  
 KūKai is built for the community—happy load testing!
