@@ -41,6 +41,41 @@ Hence, **KūKai** suggests **unstoppable** traffic generation and **powerful** t
 
 ---
 
+## Architecture Diagram
+
+Below is a **Mermaid** chart that illustrates KūKai’s modes and data flow:
+
+```mermaid
+flowchart LR
+    subgraph Commander Mode
+        A[Commander<br>gRPC Arrow Flight Server] -- Orchestrates Tests --> B[Edge Nodes]
+        B -- Telemetry --> A
+    end
+
+    subgraph Edge Mode
+        B -- Local Load --> T(Target(s))
+    end
+
+    subgraph Standalone Mode
+        C[Standalone<br>Local Load Test]
+        C -- Writes Metrics --> F[kukai_metrics.arrow]
+    end
+
+    T((Servers<br>/ Targets))
+
+    style A fill:#ffdddd,stroke:#ffaaaa,stroke-width:2px
+    style B fill:#ddffdd,stroke:#aaffaa,stroke-width:2px
+    style C fill:#dddfff,stroke:#aaaaff,stroke-width:2px
+    style T fill:#fff2cc,stroke:#ffe599,stroke-width:2px
+    style F fill:#ffe6cc,stroke:#ffd18e,stroke-width:2px
+```
+
+- **Commander** orchestrates test configurations, accumulates telemetry from edges.  
+- **Edges** run local load tasks against targets, pushing metrics back to the commander.  
+- **Standalone** runs everything locally, storing results in `.arrow`.
+
+---
+
 ## Use Cases
 
 1. **Multi-Region Load**  
@@ -90,14 +125,14 @@ weight = 2.0
 
 #### Fields:
 
-- **mode**:  
+- **mode**:
   - `commander`: Runs Arrow Flight server for telemetry.  
   - `edge`: Connects to the commander, runs the load test.  
   - `standalone`: Local testing, writes Arrow file to disk.
 - **commander.edges**: List of edge node addresses (e.g. `["edge1:50051", "edge2:50051"]`)—used only if `mode=commander`.
 - **edge.commander_address**: IP/Port for commander—only if `mode=edge`.
-- **load**:  
-  - **rps**: Target requests per second (not strictly enforced in the skeleton).  
+- **load**:
+  - **rps**: Target requests per second.  
   - **duration_seconds**: How long to run the test.  
   - **concurrency**: Number of parallel worker tasks.  
   - **payload**: The data to send over TCP.  
@@ -136,7 +171,8 @@ weight = 2.0
    - **Edge**:
      ```bash
      # Terminal B
-     # In kukai_config.toml: mode = "edge" (pointing commander_address to the Commander)
+     # In kukai_config.toml: mode = "edge"
+     # (pointing commander_address to the Commander)
      cargo run --release -- --config kukai_config.toml
      ```
      - Spawns local workers, sends metrics via Arrow Flight.
@@ -167,7 +203,7 @@ weight = 2.0
 
 ## Future Plans
 
-- **Stricter RPS Enforcement** – Integrate token-bucket or a dedicated crate (e.g. [governor](https://crates.io/crates/governor)).  
+- **Stricter RPS Enforcement** – Integrate a token-bucket or [governor](https://crates.io/crates/governor) for precise rate limiting.  
 - **Live Orchestration** – Commander can dynamically adjust concurrency or payload on edges.  
 - **Authentication / TLS** – Secure gRPC channels for production.  
 - **Persistent Storage** – Automatic writing of commander-collected data to `.arrow` or a big-data pipeline.

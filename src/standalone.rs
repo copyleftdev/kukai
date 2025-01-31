@@ -1,18 +1,15 @@
 use anyhow::Result;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Instant, Duration, SystemTime, UNIX_EPOCH};
-use rand::Rng;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use tokio::time;
-use arrow::array::{
-    TimestampMicrosecondBuilder, StringBuilder, BooleanBuilder, UInt64Builder,
-};
+use rand::{Rng, rngs::StdRng, SeedableRng};
+use tokio::time::sleep;
+use arrow::array::{TimestampMicrosecondBuilder, StringBuilder, BooleanBuilder, UInt64Builder};
 use arrow::datatypes::{Schema, Field, DataType, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use arrow_ipc::writer::FileWriter;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom};
+use tracing::info;
 
 use crate::config::{LoadConfig, Target};
 
@@ -25,20 +22,21 @@ struct AttemptMetric {
 }
 
 pub async fn run_standalone(load: &LoadConfig) -> Result<()> {
-    println!("Standalone mode -> writing Arrow to: {}", load.arrow_output);
-    // Use `rps` so it's not considered dead
-    println!("Standalone RPS: {}", load.rps);
+    info!("Standalone -> writing Arrow to {}", load.arrow_output);
+    info!("Standalone RPS: {}", load.rps);
+    let reuse = load.reuse_connection.unwrap_or(false);
+    info!("(Standalone reuse_connection = {})", reuse);
 
-    let metrics = Arc::new(Mutex::new(Vec::new()));
+    let metrics = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let end_time = Instant::now() + Duration::from_secs(load.duration_seconds as u64);
 
     let mut workers = Vec::new();
     for _ in 0..load.concurrency {
-        let mref = metrics.clone();
+        let m_ref = metrics.clone();
         let tlist = load.targets.clone();
         let pay = load.payload.clone();
         workers.push(tokio::spawn(async move {
-            run_worker(mref, tlist, pay, end_time).await;
+            run_worker(m_ref, tlist, pay, end_time).await;
         }));
     }
 
@@ -46,13 +44,12 @@ pub async fn run_standalone(load: &LoadConfig) -> Result<()> {
     let arrow_path = load.arrow_output.clone();
     let flusher = tokio::spawn(async move {
         loop {
-            time::sleep(Duration::from_secs(2)).await;
+            sleep(Duration::from_secs(2)).await;
             let mut local = {
-                let mut g = flush_ref.lock().unwrap();
+                let mut g = flush_ref.lock().await;
                 std::mem::take(&mut *g)
             };
             if !local.is_empty() {
-                // we ignore the error for these periodic flushes
                 let _ = append_to_arrow(&arrow_path, &mut local);
             }
         }
@@ -64,28 +61,26 @@ pub async fn run_standalone(load: &LoadConfig) -> Result<()> {
 
     {
         let mut leftover = {
-            let mut g = metrics.lock().unwrap();
+            let mut g = metrics.lock().await;
             std::mem::take(&mut *g)
         };
         if !leftover.is_empty() {
-            // final flush, propagate error
             append_to_arrow(&load.arrow_output, &mut leftover)?;
         }
     }
-
     flusher.abort();
-    println!("Standalone mode complete.");
+    info!("Standalone complete.");
     Ok(())
 }
 
 async fn run_worker(
-    metrics: Arc<Mutex<Vec<AttemptMetric>>>,
+    metrics: Arc<tokio::sync::Mutex<Vec<AttemptMetric>>>,
     targets: Vec<Target>,
     payload: String,
-    end: Instant,
+    end_time: Instant,
 ) {
     let mut rng = StdRng::from_entropy();
-    while Instant::now() < end {
+    while Instant::now() < end_time {
         let t = pick_target(&targets, &mut rng);
         let addr = format!("{}:{}", t.addr, t.port);
         let start = Instant::now();
@@ -97,8 +92,9 @@ async fn run_worker(
             Err(_) => false,
         };
         let latency_us = start.elapsed().as_micros() as u64;
+
         {
-            let mut g = metrics.lock().unwrap();
+            let mut g = metrics.lock().await;
             g.push(AttemptMetric {
                 ts_micros: now_micros(),
                 target: addr,
@@ -106,7 +102,7 @@ async fn run_worker(
                 latency_us,
             });
         }
-        time::sleep(Duration::from_millis(5)).await;
+        sleep(Duration::from_millis(5)).await;
     }
 }
 
@@ -126,7 +122,7 @@ fn pick_target(targets: &[Target], rng: &mut StdRng) -> Target {
 }
 
 fn now_micros() -> i64 {
-    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
     d.as_micros() as i64
 }
 
@@ -142,15 +138,13 @@ fn append_to_arrow(path: &str, items: &mut Vec<AttemptMetric>) -> Result<()> {
         Field::new("latency_us", DataType::UInt64, false),
     ]);
 
-    // If your append_value returns (), remove ? usage or handle differently
     let mut tsb = TimestampMicrosecondBuilder::new();
     let mut tgtb = StringBuilder::new();
     let mut succb = BooleanBuilder::new();
     let mut latb = UInt64Builder::new();
 
     for m in items.iter() {
-        // If your arrow version returns () instead of Result, remove ?
-        tsb.append_value(m.ts_micros); 
+        tsb.append_value(m.ts_micros);
         tgtb.append_value(&m.target);
         succb.append_value(m.success);
         latb.append_value(m.latency_us);
@@ -175,8 +169,8 @@ fn append_to_arrow(path: &str, items: &mut Vec<AttemptMetric>) -> Result<()> {
 
     let mut file = OpenOptions::new()
         .create(true)
-        .read(true)
         .append(true)
+        .read(true)
         .write(true)
         .open(path)?;
     file.seek(SeekFrom::End(0))?;

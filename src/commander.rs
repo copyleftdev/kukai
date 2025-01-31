@@ -1,8 +1,8 @@
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use anyhow::Result;
 use futures::{Stream, StreamExt};
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, transport::Server};
 use arrow_flight::{
@@ -10,6 +10,7 @@ use arrow_flight::{
     Action, ActionType, Criteria, FlightData, FlightDescriptor, FlightInfo,
     HandshakeRequest, HandshakeResponse, PutResult, SchemaResult, Ticket,
 };
+use tracing::{info, warn};
 
 use crate::config::{LoadConfig, CommanderConfig};
 
@@ -25,7 +26,6 @@ impl KaukaiFlightServer {
     }
 }
 
-// Types required by the FlightService trait
 type PutResultStream = Pin<Box<dyn Stream<Item = Result<PutResult, Status>> + Send + 'static>>;
 type EmptyStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 
@@ -47,16 +47,15 @@ impl FlightService for KaukaiFlightServer {
         let mut stream = req.into_inner();
 
         tokio::spawn(async move {
-            while let Some(Ok(_handshake_msg)) = stream.next().await {
-                // handle or validate credentials here
+            while let Some(Ok(msg)) = stream.next().await {
+                info!("Commander handshake: {:?}", msg);
             }
             let _ = tx.send(Ok(HandshakeResponse {
                 protocol_version: 0,
-                payload: Default::default(),
+                payload: Vec::new().into(),
             }))
             .await;
         });
-
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 
@@ -78,7 +77,6 @@ impl FlightService for KaukaiFlightServer {
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 
-    // <-- UPDATED to avoid holding MutexGuard across an await.
     async fn do_put(
         &self,
         request: Request<tonic::Streaming<FlightData>>,
@@ -88,17 +86,16 @@ impl FlightService for KaukaiFlightServer {
         let mut inbound = request.into_inner();
 
         tokio::spawn(async move {
-            while let Some(Ok(data)) = inbound.next().await {
+            while let Some(Ok(chunk)) = inbound.next().await {
                 {
-                    // Acquire and drop the guard in its own scope
-                    let mut store = store_ref.lock().unwrap();
-                    store.push(data);
+                    let mut guard = store_ref.lock().await;
+                    guard.push(chunk);
                 }
-                // Now that the guard is dropped, we can safely await
-                let _ = tx.send(Ok(PutResult {
-                    app_metadata: vec![].into(),
-                }))
-                .await;
+                if let Err(e) = tx.send(Ok(PutResult {
+                    app_metadata: Vec::new().into(),
+                })).await {
+                    warn!("Commander: do_put send error: {:?}", e);
+                }
             }
         });
 
@@ -148,12 +145,12 @@ impl FlightService for KaukaiFlightServer {
 }
 
 pub async fn run_commander(load: &LoadConfig, cmdr: &CommanderConfig) -> Result<()> {
-    println!("Commander -> edges: {:?}", cmdr.edges);
-    println!("Commander ignoring RPS: {}", load.rps);
+    info!("Commander edges: {:?}", cmdr.edges);
+    info!("Commander ignoring RPS: {}", load.rps);
 
     let addr = "0.0.0.0:50051".parse()?;
     let service = KaukaiFlightServer::new();
-    println!("Commander listening on {}", addr);
+    info!("Commander listening on {}", addr);
 
     Server::builder()
         .add_service(FlightServiceServer::new(service))
