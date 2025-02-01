@@ -1,77 +1,47 @@
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
-use std::io;
+use anyhow::Result;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Target {
-    pub addr: String,
-    pub port: u16,
-    pub weight: f32,
+    pub address: String,
+    pub port: Option<u16>,
+    pub weight: Option<f64>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Debug)]
 pub struct LoadConfig {
     pub rps: usize,
-    pub duration_seconds: usize,
     pub concurrency: usize,
-    pub payload: String,
-    pub targets: Vec<Target>,
-    pub arrow_output: String,
     pub reuse_connection: Option<bool>,
+    pub duration_seconds: Option<usize>,
+    pub targets: Option<Vec<Target>>,
+    pub payload: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Debug)]
 pub struct CommanderConfig {
-    pub edges: Vec<String>,
+    pub edges: Option<Vec<String>>,
+    pub commander_address: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Debug)]
 pub struct EdgeConfig {
-    pub commander_address: String,
+    pub commander_address: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct AppConfig {
+#[derive(Deserialize, Debug)]
+pub struct Config {
     pub mode: String,
+    pub load: LoadConfig,
     pub commander: Option<CommanderConfig>,
     pub edge: Option<EdgeConfig>,
-    pub load: LoadConfig,
+    #[allow(dead_code)]
+    pub arrow_output: Option<String>,
 }
 
-fn is_safe_path(path: &Path) -> io::Result<PathBuf> {
-    // Get the current directory
-    let current_dir = std::env::current_dir()?;
-    
-    // Get absolute paths
-    let absolute_current = current_dir.canonicalize()?;
-    let absolute_path = path.canonicalize()?;
-    
-    // Convert to string representation for comparison
-    let current_str = absolute_current.to_str()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8 in current path"))?;
-    let path_str = absolute_path.to_str()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8 in target path"))?;
-    
-    // Check if the path is within or equal to the current directory
-    if path_str.starts_with(current_str) {
-        Ok(absolute_path)
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "Path is outside of allowed directory"
-        ))
-    }
-}
-
-pub fn load_config(path: &str) -> anyhow::Result<AppConfig> {
-    let path = Path::new(path);
-    
-    // Verify path is safe before proceeding
-    let canonical_path = is_safe_path(path)
-        .map_err(|e| anyhow::anyhow!("Invalid or unsafe path: {}", e))?;
-        
-    // Read and parse config
-    let contents = std::fs::read_to_string(canonical_path)?;
-    let cfg: AppConfig = toml::from_str(&contents)?;
+pub fn load_config(path: &str) -> Result<Config> {
+    let canonical = std::fs::canonicalize(path)?;
+    let content = std::fs::read_to_string(&canonical)?;
+    let cfg: Config = toml::from_str(&content)?;
     Ok(cfg)
 }

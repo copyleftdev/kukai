@@ -1,182 +1,60 @@
+// src/standalone.rs
 use anyhow::Result;
+use reqwest::Client;
 use std::sync::Arc;
-use std::time::{Instant, Duration, SystemTime, UNIX_EPOCH};
-use rand::{Rng, rngs::StdRng, SeedableRng};
+use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 use tokio::time::sleep;
-use arrow::array::{TimestampMicrosecondBuilder, StringBuilder, BooleanBuilder, UInt64Builder};
-use arrow::datatypes::{Schema, Field, DataType, TimeUnit};
-use arrow::record_batch::RecordBatch;
-use arrow_ipc::writer::FileWriter;
-use std::fs::OpenOptions;
-use std::io::{Seek, SeekFrom};
-use tracing::info;
+use crate::token_bucket::TokenBucket;
 
-use crate::config::{LoadConfig, Target};
-
-#[derive(Clone)]
-struct AttemptMetric {
-    ts_micros: i64,
-    target: String,
-    success: bool,
-    latency_us: u64,
-}
-
-pub async fn run_standalone(load: &LoadConfig) -> Result<()> {
-    info!("Standalone -> writing Arrow to {}", load.arrow_output);
-    info!("Standalone RPS: {}", load.rps);
-    let reuse = load.reuse_connection.unwrap_or(false);
-    info!("(Standalone reuse_connection = {})", reuse);
-
-    let metrics = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-    let end_time = Instant::now() + Duration::from_secs(load.duration_seconds as u64);
-
-    let mut workers = Vec::new();
-    for _ in 0..load.concurrency {
-        let m_ref = metrics.clone();
-        let tlist = load.targets.clone();
-        let pay = load.payload.clone();
-        workers.push(tokio::spawn(async move {
-            run_worker(m_ref, tlist, pay, end_time).await;
-        }));
-    }
-
-    let flush_ref = metrics.clone();
-    let arrow_path = load.arrow_output.clone();
-    let flusher = tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_secs(2)).await;
-            let mut local = {
-                let mut g = flush_ref.lock().await;
-                std::mem::take(&mut *g)
-            };
-            if !local.is_empty() {
-                let _ = append_to_arrow(&arrow_path, &mut local);
-            }
-        }
-    });
-
-    for w in workers {
-        let _ = w.await;
-    }
-
-    {
-        let mut leftover = {
-            let mut g = metrics.lock().await;
-            std::mem::take(&mut *g)
-        };
-        if !leftover.is_empty() {
-            append_to_arrow(&load.arrow_output, &mut leftover)?;
-        }
-    }
-    flusher.abort();
-    info!("Standalone complete.");
+async fn send_request(request_id: usize, client: &Client, target_url: &str) -> Result<()> {
+    println!("Dispatching request {} at {:?}", request_id, Instant::now());
+    let response = client.get(target_url).send().await?;
+    println!("Completed request {} with status {} at {:?}", request_id, response.status(), Instant::now());
     Ok(())
 }
 
-async fn run_worker(
-    metrics: Arc<tokio::sync::Mutex<Vec<AttemptMetric>>>,
-    targets: Vec<Target>,
-    payload: String,
-    end_time: Instant,
-) {
-    let mut rng = StdRng::from_entropy();
-    while Instant::now() < end_time {
-        let t = pick_target(&targets, &mut rng);
-        let addr = format!("{}:{}", t.addr, t.port);
-        let start = Instant::now();
-        let success = match tokio::net::TcpStream::connect(&addr).await {
-            Ok(mut s) => {
-                use tokio::io::AsyncWriteExt;
-                s.write_all(payload.as_bytes()).await.is_ok()
-            }
-            Err(_) => false,
-        };
-        let latency_us = start.elapsed().as_micros() as u64;
-
+pub async fn run_standalone() -> Result<()> {
+    let test_duration = Duration::from_secs(30);
+    let target_rate = 5.0;
+    let bucket_capacity = 10;
+    let target_url = "http://example.com";
+    let client = Client::new();
+    let token_bucket = Arc::new(Mutex::new(TokenBucket::new(bucket_capacity, target_rate)));
+    let start_time = Instant::now();
+    let mut request_count: usize = 0;
+    while Instant::now().duration_since(start_time) < test_duration {
         {
-            let mut g = metrics.lock().await;
-            g.push(AttemptMetric {
-                ts_micros: now_micros(),
-                target: addr,
-                success,
-                latency_us,
-            });
+            let mut bucket = token_bucket.lock().await;
+            if bucket.try_consume(1.0).await {
+                request_count += 1;
+                let request_id = request_count;
+                let client = client.clone();
+                let url = target_url.to_string();
+                tokio::spawn(async move {
+                    if let Err(e) = send_request(request_id, &client, &url).await {
+                        eprintln!("Error sending request {}: {}", request_id, e);
+                    }
+                });
+            }
         }
-        sleep(Duration::from_millis(5)).await;
+        sleep(Duration::from_millis(10)).await;
     }
-}
-
-fn pick_target(targets: &[Target], rng: &mut StdRng) -> Target {
-    let sum: f32 = targets.iter().map(|x| x.weight).sum();
-    if sum <= 0.0 {
-        return targets[0].clone();
-    }
-    let mut roll = rng.gen_range(0.0..sum);
-    for t in targets {
-        if roll < t.weight {
-            return t.clone();
-        }
-        roll -= t.weight;
-    }
-    targets[targets.len() - 1].clone()
-}
-
-fn now_micros() -> i64 {
-    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    d.as_micros() as i64
-}
-
-fn append_to_arrow(path: &str, items: &mut Vec<AttemptMetric>) -> Result<()> {
-    if items.is_empty() {
-        return Ok(());
-    }
-
-    let schema = Schema::new(vec![
-        Field::new("timestamp_micros", DataType::Timestamp(TimeUnit::Microsecond, None), false),
-        Field::new("target", DataType::Utf8, false),
-        Field::new("success", DataType::Boolean, false),
-        Field::new("latency_us", DataType::UInt64, false),
-    ]);
-
-    let mut tsb = TimestampMicrosecondBuilder::new();
-    let mut tgtb = StringBuilder::new();
-    let mut succb = BooleanBuilder::new();
-    let mut latb = UInt64Builder::new();
-
-    for m in items.iter() {
-        tsb.append_value(m.ts_micros);
-        tgtb.append_value(&m.target);
-        succb.append_value(m.success);
-        latb.append_value(m.latency_us);
-    }
-
-    let ts_arr = tsb.finish();
-    let s_arr = tgtb.finish();
-    let b_arr = succb.finish();
-    let u_arr = latb.finish();
-
-    let batch = RecordBatch::try_new(
-        std::sync::Arc::new(schema.clone()),
-        vec![
-            std::sync::Arc::new(ts_arr),
-            std::sync::Arc::new(s_arr),
-            std::sync::Arc::new(b_arr),
-            std::sync::Arc::new(u_arr),
-        ],
-    )?;
-
-    items.clear();
-
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .read(true)
-        .write(true)
-        .open(path)?;
-    file.seek(SeekFrom::End(0))?;
-
-    let mut writer = FileWriter::try_new(file, &schema)?;
-    writer.write(&batch)?;
-    writer.finish()?;
+    println!("Load test completed. Total requests dispatched: {}", request_count);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::time::sleep;
+
+    #[tokio::test]
+    async fn test_token_bucket() {
+        let mut bucket = TokenBucket::new(5, 1.0);
+        assert!(bucket.try_consume(3.0).await);
+        assert!(!bucket.try_consume(3.0).await);
+        sleep(Duration::from_secs(3)).await;
+        assert!(bucket.try_consume(3.0).await);
+    }
 }
