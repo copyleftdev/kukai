@@ -1,5 +1,5 @@
 # KūKai
-
+[![Rust](https://github.com/copyleftdev/kukai/actions/workflows/rust.yml/badge.svg)](https://github.com/copyleftdev/kukai/actions/workflows/rust.yml)
 <img src="logo.png" alt="KūKai Mascot" width="150" align="right" />
 
 ![Rust](https://img.shields.io/badge/language-Rust-orange?style=flat-square)
