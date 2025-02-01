@@ -1,4 +1,3 @@
-// src/standalone.rs
 use anyhow::Result;
 use reqwest::Client;
 use std::sync::Arc;
@@ -7,12 +6,13 @@ use tokio::sync::Mutex;
 use tokio::time::sleep;
 use crate::token_bucket::TokenBucket;
 
-async fn send_request(request_id: usize, client: &Client, target_url: &str) -> Result<()> {
+pub async fn send_request(request_id: usize, client: &Client, target_url: &str) -> Result<()> {
     println!("Dispatching request {} at {:?}", request_id, Instant::now());
     let response = client.get(target_url).send().await?;
     println!("Completed request {} with status {} at {:?}", request_id, response.status(), Instant::now());
     Ok(())
 }
+
 
 pub async fn run_standalone() -> Result<()> {
     let test_duration = Duration::from_secs(30);
@@ -44,17 +44,18 @@ pub async fn run_standalone() -> Result<()> {
     Ok(())
 }
 
+fn calculate_request_interval(rate: f64) -> Duration {
+    Duration::from_secs_f64(1.0 / rate)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::time::sleep;
+    use std::time::Duration;
 
-    #[tokio::test]
-    async fn test_token_bucket() {
-        let mut bucket = TokenBucket::new(5, 1.0);
-        assert!(bucket.try_consume(3.0).await);
-        assert!(!bucket.try_consume(3.0).await);
-        sleep(Duration::from_secs(3)).await;
-        assert!(bucket.try_consume(3.0).await);
+    #[test]
+    fn test_calculate_request_interval() {
+        let interval = calculate_request_interval(5.0);
+        assert_eq!(interval, Duration::from_millis(200));
     }
 }

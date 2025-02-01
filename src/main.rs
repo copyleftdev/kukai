@@ -7,7 +7,7 @@ mod token_bucket;
 use anyhow::Result;
 use clap::Parser;
 use config::load_config;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 use tracing::info;
 use tracing_subscriber::filter::EnvFilter;
@@ -29,15 +29,23 @@ struct Cli {
 }
 
 fn main() -> Result<()> {
+    // Set up tracing with an environment filter.
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let subscriber = FmtSubscriber::builder().with_env_filter(env_filter).finish();
+    let subscriber = FmtSubscriber::builder()
+        .with_env_filter(env_filter)
+        .finish();
     tracing::subscriber::set_global_default(subscriber)
         .expect("Unable to set global default tracing subscriber");
+
     let cli = Cli::parse();
     let rt = Runtime::new()?;
     rt.block_on(async {
+        // Use the provided config path or default to "kukai_config.toml".
         let path = cli.config.unwrap_or_else(|| PathBuf::from("kukai_config.toml"));
-        let mut cfg = load_config(path.to_str().unwrap())?;
+        // Call load_config with both the file name and a trusted base directory.
+        let mut cfg = load_config(path.to_str().unwrap(), Path::new("./config"))?;
+        
+        // Apply CLI overrides.
         if let Some(m) = cli.mode {
             cfg.mode = m;
         }
@@ -60,11 +68,8 @@ fn main() -> Result<()> {
                 }
             }
             "edge" => {
-                if let Some(ec) = &cfg.edge {
-                    edge::run_edge(&cfg.load, ec).await?;
-                } else {
-                    eprintln!("Edge mode requires [edge] in config.");
-                }
+                // Since cfg.edge is a concrete EdgeConfig (with a default), clone it to pass to run_edge.
+                edge::run_edge(&cfg.load, &cfg.edge).await?;
             }
             "standalone" => {
                 standalone::run_standalone().await?;

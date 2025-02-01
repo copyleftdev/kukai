@@ -1,4 +1,3 @@
-// src/token_bucket.rs
 use std::time::Instant;
 
 pub struct TokenBucket {

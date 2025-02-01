@@ -14,7 +14,7 @@ payload = "GET / HTTP/1.1\r\nHost: example\r\n\r\n"
 arrow_output = "kukai_metrics.arrow"
 reuse_connection = true
 
-[[load.targets]]
-addr = "127.0.0.1"
+[load.targets]
+address = "127.0.0.1"
 port = 8080
 weight = 1.0

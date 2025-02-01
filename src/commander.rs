@@ -53,8 +53,7 @@ impl FlightService for KaukaiFlightServer {
             let _ = tx.send(Ok(HandshakeResponse {
                 protocol_version: 0,
                 payload: Vec::new().into(),
-            }))
-            .await;
+            })).await;
         });
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
